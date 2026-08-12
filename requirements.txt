@@ -1,0 +1,9 @@
+streamlit
+plotly
+xgboost
+pandas
+numpy
+scikit-learn
+requests
+pydeck
+feedparser
