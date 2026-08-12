@@ -1,48 +1,14 @@
-import subprocess
-import sys
-import time
-import re
-from IPython.display import display, HTML
-
-# =============================================================================
-# 1. INSTALL CLOUDFLARED BINARY & PYTHON DEPENDENCIES
-# =============================================================================
-print("Installing cloudflared binary on Colab Linux environment...")
-subprocess.check_call("wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb", shell=True)
-subprocess.check_call("dpkg -i cloudflared-linux-amd64.deb", shell=True)
-
-print("Installing required Python dependencies...")
-dependencies = [
-    "streamlit",
-    "plotly",
-    "xgboost",
-    "pandas",
-    "numpy",
-    "scikit-learn",
-    "requests",
-    "pydeck",
-    "feedparser"
-]
-subprocess.check_call([sys.executable, "-m", "pip", "install", "-q"] + dependencies)
-print("All system and Python packages installed successfully.\n")
-
-# =============================================================================
-# 2. WRITE STREAMLIT APP CODE TO app.py
-# =============================================================================
-app_code = r'''
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 import pydeck as pdk
 from datetime import datetime, timedelta
 import feedparser
 import warnings
 warnings.filterwarnings("ignore")
 
-from sklearn.preprocessing import StandardScaler
-from xgboost import XGBRegressor, XGBRFRegressor
+from xgboost import XGBRegressor
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 
 # -----------------------------------------------------------------------------
@@ -60,7 +26,6 @@ st.markdown("""
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     .stApp { background-color: #0b0e14; color: #e6edf3; }
     
-    /* Metric Card Styling */
     .metric-card {
         background: #161b22;
         border: 1px solid #30363d;
@@ -72,12 +37,6 @@ st.markdown("""
     .metric-value { font-size: 1.9rem; font-weight: 700; color: #58a6ff; margin: 0.3rem 0; }
     .metric-sub { font-size: 0.8rem; color: #7d8590; }
     
-    /* Risk Badges */
-    .badge-low { background: #13231b; color: #3fb950; border: 1px solid #238636; padding: 4px 10px; border-radius: 20px; font-weight: 600; }
-    .badge-medium { background: #272015; color: #d29922; border: 1px solid #9e6a03; padding: 4px 10px; border-radius: 20px; font-weight: 600; }
-    .badge-high { background: #2e1518; color: #f85149; border: 1px solid #da3633; padding: 4px 10px; border-radius: 20px; font-weight: 600; }
-
-    /* Zone Detail Box */
     .zone-box {
         background-color: #161b22;
         border-left: 5px solid #58a6ff;
@@ -144,7 +103,7 @@ INDIAN_CORRIDORS = {
 TRUCK_CAPACITY_TONS = 22.0
 
 # -----------------------------------------------------------------------------
-# REAL-TIME SIMULATION & MODEL ENGINE PIPELINE
+# REAL-TIME SIMULATION PIPELINE
 # -----------------------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def generate_india_data(corridor_name, horizon_days, is_auto_signals, manual_fuel, manual_weather):
@@ -157,11 +116,8 @@ def generate_india_data(corridor_name, horizon_days, is_auto_signals, manual_fue
     n = len(all_dates)
     
     rng = np.random.default_rng(seed=abs(hash(corridor_name)) % (2**31))
-    
     t = np.arange(n)
-    dow = np.array([d.weekday() for d in all_dates])
     
-    # Regional Weather & Fuel setup
     if is_auto_signals:
         weather_base = cfg["weather_default"]
         fuel_base = cfg["fuel_idx"]
@@ -181,11 +137,9 @@ def generate_india_data(corridor_name, horizon_days, is_auto_signals, manual_fue
         "true_demand": np.round(demand, 1),
         "fuel_price": np.round(fuel_price, 2),
         "weather_idx": np.round(weather_idx, 2),
-        "dow": dow,
         "is_future": all_dates > pd.Timestamp(end_hist)
     })
     
-    # Feature Engineering
     for lag in [1, 3, 7, 14]:
         df[f"lag_{lag}"] = df["true_demand"].shift(lag)
     df["roll_mean_7"] = df["true_demand"].shift(1).rolling(7, min_periods=1).mean()
@@ -245,17 +199,15 @@ model.fit(train_df[feature_cols], train_df["true_demand"])
 df["predicted_demand"] = model.predict(df[feature_cols])
 
 # -----------------------------------------------------------------------------
-# MAIN LAYOUT: TITLE & 3D INTERACTIVE INDIA MAP (TOP SECTION)
+# MAIN LAYOUT: TITLE & 3D INTERACTIVE MAP
 # -----------------------------------------------------------------------------
 st.title("FreightSense AI · India Freight & Demand Forecasting")
 st.caption("3D Spatial Logistics Engine & Zone-Specific Predictive Analytics")
 
-# MAP SECTION
 st.subheader("3D Interactive Freight Map of India")
 
 corridor_info = INDIAN_CORRIDORS[selected_corridor]
 
-# Prepare PyDeck Map Data
 arc_data = []
 node_data = []
 
@@ -265,10 +217,10 @@ for name, info in INDIAN_CORRIDORS.items():
         "name": name,
         "from_lat": info["lat1"], "from_lon": info["lon1"],
         "to_lat": info["lat2"], "to_lon": info["lon2"],
-        "color": [255, 100, 0, 255] if is_active else [0, 150, 255, 150]
+        "color": [255, 80, 0, 255] if is_active else [0, 180, 255, 180]
     })
     node_data.append({"name": name + " Origin", "lat": info["lat1"], "lon": info["lon1"], "color": [255, 255, 255]})
-    node_data.append({"name": name + " Dest", "lat": info["lat2"], "lon": info["lon2"], "color": [0, 255, 150]})
+    node_data.append({"name": name + " Destination", "lat": info["lat2"], "lon": info["lon2"], "color": [0, 255, 150]})
 
 arc_layer = pdk.Layer(
     "ArcLayer",
@@ -286,15 +238,15 @@ scatter_layer = pdk.Layer(
     data=node_data,
     get_position=["lon", "lat"],
     get_fill_color="color",
-    get_radius=25000,
+    get_radius=30000,
     pickable=True
 )
 
 view_state = pdk.ViewState(
-    latitude=21.5937,
+    latitude=22.5937,
     longitude=78.9629,
-    zoom=4.3,
-    pitch=45,
+    zoom=4.2,
+    pitch=50,
     bearing=-10
 )
 
@@ -302,11 +254,11 @@ st.pydeck_chart(pdk.Deck(
     layers=[arc_layer, scatter_layer],
     initial_view_state=view_state,
     tooltip={"text": "{name}"},
-    map_style="mapbox://styles/mapbox/dark-v10"
+    map_style=pdk.map_styles.CARTO_DARK
 ))
 
 # -----------------------------------------------------------------------------
-# ZONE DEMAND DESCRIPTION BOX (EXPANDS ON SELECTION)
+# ZONE DEMAND DESCRIPTION BOX
 # -----------------------------------------------------------------------------
 st.markdown(f"""
 <div class="zone-box">
@@ -322,7 +274,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# DATA DASHBOARD WITH METRICS & GRAPH (BELOW MAP)
+# DATA DASHBOARD WITH METRICS & GRAPH
 # -----------------------------------------------------------------------------
 st.subheader("Freight Demand Dashboard & Analytics")
 
@@ -343,7 +295,6 @@ with c4:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 3D STYLED INTERACTIVE DEMAND GRAPH
 st.markdown(f"### Interactive Demand Trend & Forecast Window ({horizon_days}-Day Horizon)")
 
 fig = go.Figure()
@@ -399,45 +350,5 @@ try:
                 <p style="font-size:0.8rem; color:#7d8590; margin-top:5px;">Published: {entry.published}</p>
             </div>
             """, unsafe_allow_html=True)
-except Exception as e:
-    st.info("Live news feed updating... connect internet or re-run cell to refresh RSS stream.")
-'''
-
-with open("app.py", "w") as f:
-    f.write(app_code)
-
-print("'app.py' written successfully.")
-
-# =============================================================================
-# 3. START STREAMLIT & CAPTURE CLOUDFLARE TUNNEL URL
-# =============================================================================
-print("Starting Streamlit application in background...")
-subprocess.Popen(["streamlit", "run", "app.py", "--server.port", "8501"])
-time.sleep(3)
-
-print("Generating public Cloudflare Tunnel link...\n")
-tunnel_proc = subprocess.Popen(
-    ["cloudflared", "tunnel", "--url", "http://localhost:8501"], 
-    stdout=subprocess.PIPE, 
-    stderr=subprocess.STDOUT, 
-    text=True
-)
-
-tunnel_url = None
-for line in iter(tunnel_proc.stdout.readline, ''):
-    match = re.search(r'https://[a-zA-Z0-9-]+\.trycloudflare\.com', line)
-    if match:
-        tunnel_url = match.group(0)
-        break
-
-if tunnel_url:
-    display(HTML(f'''
-    <div style="background-color: #161b22; border: 2px solid #38d430; border-radius: 10px; padding: 20px; font-family: Arial, sans-serif; margin: 10px 0;">
-        <h3 style="color: #38d430; margin-top: 0;">Your App is Live!</h3>
-        <p style="color: #e6edf3; font-size: 16px;">Click the button below to open your updated interactive Streamlit Dashboard:</p>
-        <a href="{tunnel_url}" target="_blank" style="background-color: #238636; color: white; padding: 12px 24px; text-decoration: none; font-size: 18px; font-weight: bold; border-radius: 6px; display: inline-block;">OPEN DASHBOARD APP</a>
-        <p style="color: #8b949e; font-size: 12px; margin-bottom: 0; margin-top: 15px;">Direct Link: <a href="{tunnel_url}" target="_blank" style="color: #58a6ff;">{tunnel_url}</a></p>
-    </div>
-    '''))
-else:
-    print("Failed to automatically detect tunnel URL. Check cloudflared output.")
+except Exception:
+    st.info("Live news feed updating...")
